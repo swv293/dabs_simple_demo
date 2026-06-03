@@ -1,4 +1,25 @@
 {
+  "_note": [
+    "PLACEHOLDER DASHBOARD — replace with a real export before presenting.",
+    "",
+    "How to build the real dashboard:",
+    "  1. Run:  ./scripts/demo_deploy.sh dev",
+    "  2. Open the deployed '[dev] DABs Demo Dashboard' in the workspace UI",
+    "  3. Add widgets in the Lakeview editor (see Genie Code prompts in README §10):",
+    "       - Line chart: revenue over time from gold_daily_revenue",
+    "       - Bar chart:  top 10 products by revenue",
+    "       - Counter:    total orders (COUNT from gold_daily_revenue)",
+    "  4. Export the file: Workspace API GET /api/2.0/workspace/export",
+    "     or: File > Download from the dashboard editor",
+    "  5. Replace this file with the exported .lvdash.json",
+    "  6. Commit and push — the bundle will deploy the real widgets next time",
+    "",
+    "Important: keep SQL queries unqualified (table name only, no catalog prefix)",
+    "so that dataset_catalog + dataset_schema in resources/dashboard.yml work",
+    "correctly across dev / staging / prod targets.",
+    "",
+    "Docs: https://docs.databricks.com/aws/en/dev-tools/bundles/resources#dashboard"
+  ],
   "datasets": [
     {
       "name": "gold_daily_revenue",
@@ -17,10 +38,10 @@
       "layout": [
         {
           "widget": {
-            "name": "title",
-            "textbox_spec": "# DABs Simple Demo Dashboard\n\nReplace this placeholder with widgets built in the Lakeview editor (plan.md task #8).\n\nNote: SQL uses unqualified table names — dataset_catalog and dataset_schema in dashboard.yml inject the right catalog/schema per target."
+            "name": "placeholder_note",
+            "textbox_spec": "## Placeholder Dashboard\n\nThis is a placeholder. Build the real widgets in the Lakeview editor and replace this file — see `src/dashboard/demo.lvdash.json` for instructions, or README §10 for the Genie Code prompts.\n\n**Dataset is wired up:** `gold_daily_revenue` is already registered above and will resolve against the target catalog/schema at deploy time via `dataset_catalog` + `dataset_schema` in `resources/dashboard.yml`."
           },
-          "position": { "x": 0, "y": 0, "width": 6, "height": 2 }
+          "position": { "x": 0, "y": 0, "width": 6, "height": 3 }
         }
       ]
     }
