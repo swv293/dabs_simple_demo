@@ -1,0 +1,28 @@
+{
+  "datasets": [
+    {
+      "name": "gold_daily_revenue",
+      "displayName": "Daily Revenue",
+      "queryLines": [
+        "SELECT order_date, region, orders, revenue\n",
+        "FROM gold_daily_revenue\n",
+        "ORDER BY order_date"
+      ]
+    }
+  ],
+  "pages": [
+    {
+      "name": "page_overview",
+      "displayName": "Overview",
+      "layout": [
+        {
+          "widget": {
+            "name": "title",
+            "textbox_spec": "# DABs Simple Demo Dashboard\n\nReplace this placeholder with widgets built in the Lakeview editor (plan.md task #8).\n\nNote: SQL uses unqualified table names — dataset_catalog and dataset_schema in dashboard.yml inject the right catalog/schema per target."
+          },
+          "position": { "x": 0, "y": 0, "width": 6, "height": 2 }
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,75 @@
+# daily_etl — 4-task workflow:
+#   ddl     create idempotent bronze/silver/gold tables in the target catalog
+#   ingest  notebook generates synthetic CSV + COPY INTO bronze
+#   silver  bronze -> silver (typed, deduped) via INSERT OVERWRITE
+#   gold    silver -> gold_daily_revenue aggregate
+#
+# Schedule lives in the base — mode: development auto-pauses (dev target).
+# staging unpauses it via presets.trigger_pause_status. prod runs unpaused
+# by default since it uses mode: production.
+
+resources:
+  jobs:
+    daily_etl:
+      name: daily_etl
+
+      # Serverless notebook compute — works on any workspace with serverless
+      # enabled (including Free Edition). If your workspace uses classic
+      # clusters instead, replace `environments` + `environment_key` with
+      # a `job_clusters` block and `job_cluster_key` on the notebook task.
+      environments:
+        - environment_key: serverless_env
+          spec:
+            client: "1"
+
+      tasks:
+        - task_key: ddl
+          sql_task:
+            warehouse_id: ${var.warehouse_id}
+            file:
+              path: ../src/sql/01_ddl.sql
+            parameters:
+              catalog: ${var.catalog}
+              schema:  ${resources.schemas.demo.name}
+
+        - task_key: ingest
+          depends_on:
+            - task_key: ddl
+          environment_key: serverless_env
+          notebook_task:
+            notebook_path: ../src/notebooks/ingest.py
+            base_parameters:
+              catalog: ${var.catalog}
+              schema:  ${resources.schemas.demo.name}
+              volume:  ${resources.volumes.demo_raw.name}
+
+        - task_key: silver
+          depends_on:
+            - task_key: ingest
+          sql_task:
+            warehouse_id: ${var.warehouse_id}
+            file:
+              path: ../src/sql/02_silver.sql
+            parameters:
+              catalog: ${var.catalog}
+              schema:  ${resources.schemas.demo.name}
+
+        - task_key: gold
+          depends_on:
+            - task_key: silver
+          sql_task:
+            warehouse_id: ${var.warehouse_id}
+            file:
+              path: ../src/sql/03_gold.sql
+            parameters:
+              catalog: ${var.catalog}
+              schema:  ${resources.schemas.demo.name}
+
+      schedule:
+        quartz_cron_expression: "0 0 6 * * ?"
+        timezone_id: America/New_York
+        pause_status: PAUSED
+
+      email_notifications:
+        on_failure:
+          - ${var.notifications_email}

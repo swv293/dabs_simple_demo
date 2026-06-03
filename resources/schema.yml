@@ -1,0 +1,16 @@
+# UC schema + managed volume. The schema's parent catalog must already exist
+# in the target workspace — this bundle does not create catalogs.
+resources:
+  schemas:
+    demo:
+      catalog_name: ${var.catalog}
+      name: ${var.schema_name}
+      comment: "DABs demo schema for target=${bundle.target}"
+
+  volumes:
+    demo_raw:
+      catalog_name: ${var.catalog}
+      schema_name: ${resources.schemas.demo.name}
+      name: raw
+      volume_type: MANAGED
+      comment: "Landing volume for synthetic CSV before COPY INTO bronze_orders"

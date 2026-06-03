@@ -1,0 +1,117 @@
+# DABs Simple Demo — bundle root
+#
+# Teaching demo for Databricks Asset Bundles. One bundle, three targets
+# (dev / staging / prod) — same YAML, different environments.
+#
+# Nothing workspace-specific lives in this file. Provide your workspace
+# and catalog via environment variables before running any bundle command:
+#
+#   export DATABRICKS_HOST="https://<your-workspace>.cloud.databricks.com"
+#   export BUNDLE_VAR_catalog="<your-catalog>"   # e.g. "workspace" on Free Edition
+#
+# Or pass them inline:
+#   DATABRICKS_HOST=https://… BUNDLE_VAR_catalog=workspace databricks bundle deploy -t dev
+#
+# Remaining usage:
+#   databricks bundle validate -t dev
+#   databricks bundle deploy   -t dev
+#   databricks bundle run daily_etl -t dev
+#   databricks bundle destroy  -t dev
+
+bundle:
+  name: dabs_simple_demo
+
+include:
+  - resources/*.yml
+
+# ---------------------------------------------------------------------------
+# Variables — declared once, overridden per target or via environment.
+#
+# Supply values without editing this file:
+#   BUNDLE_VAR_catalog=workspace            (env var — highest priority)
+#   --var catalog=workspace                 (CLI flag)
+#   target-level variables block below      (lowest priority)
+#
+# The ideal CI/CD pattern is one catalog per environment
+# (dev_orders, staging_orders, prod_orders). On workspaces that restrict
+# catalog creation (e.g. Free Edition) use one catalog with per-target
+# schema names — the isolation is identical, one level down.
+# ---------------------------------------------------------------------------
+variables:
+  catalog:
+    description: UC catalog this target writes into
+    default: workspace          # Free Edition default; override via BUNDLE_VAR_catalog
+  schema_name:
+    description: Schema inside the catalog — differentiated per target
+  warehouse_id:
+    description: SQL warehouse for SQL tasks + the Lakeview dashboard
+    lookup:
+      warehouse: Serverless Starter Warehouse
+  notifications_email:
+    description: Email for on_failure job notifications
+    default: ${workspace.current_user.userName}
+  prod_sp:
+    description: Service principal application ID for prod run_as
+    default: ""
+
+# ---------------------------------------------------------------------------
+# Targets — one bundle, three deployment contexts.
+#
+# workspace.host is intentionally omitted from every target. The bundle
+# resolves it from (in priority order):
+#   1. DATABRICKS_HOST environment variable
+#   2. DATABRICKS_CONFIG_PROFILE environment variable → ~/.databrickscfg
+#   3. --profile / -p CLI flag → ~/.databrickscfg
+#
+# This keeps all workspace-specific values out of source control.
+# In CI/CD, set DATABRICKS_HOST (and DATABRICKS_CLIENT_ID / _SECRET for
+# OAuth M2M) as pipeline secret variables scoped to each environment.
+#
+#   dev      mode: development — auto-prefixes names, auto-pauses schedule,
+#            isolates per user so two developers don't collide
+#   staging  mode: development — separate schema, alerts go to team mailbox
+#   prod     mode: production  — unpaused schedule, runs as service principal,
+#            governed by permissions block; state in shared Workspace path
+# ---------------------------------------------------------------------------
+targets:
+
+  dev:
+    mode: development
+    default: true
+    variables:
+      schema_name: dabs_demo_dev
+    run_as:
+      user_name: ${workspace.current_user.userName}
+
+  staging:
+    # In a real org, point this at a dedicated staging workspace by setting
+    # DATABRICKS_HOST before running `bundle deploy -t staging`.
+    # mode: development keeps users isolated via name_prefix and keeps the
+    # schedule paused (DABs forbids UNPAUSED under mode: development —
+    # use mode: production for staging when you want the schedule to fire).
+    mode: development
+    variables:
+      schema_name: dabs_demo_staging
+      notifications_email: staging-alerts@example.com
+    presets:
+      name_prefix: "[staging-${workspace.current_user.short_name}] "
+    run_as:
+      user_name: ${workspace.current_user.userName}
+
+  prod:
+    mode: production
+    workspace:
+      # root_path moves bundle state from the per-user folder to a shared
+      # location so any service principal or admin can manage it.
+      root_path: /Workspace/Shared/.bundle/${bundle.name}/${bundle.target}
+    variables:
+      schema_name: dabs_demo_prod
+      notifications_email: prod-alerts@example.com
+      prod_sp: <prod-sp-application-id>   # override via BUNDLE_VAR_prod_sp
+    run_as:
+      service_principal_name: ${var.prod_sp}
+    permissions:
+      - level: CAN_MANAGE
+        group_name: data-platform-admins
+      - level: CAN_VIEW
+        group_name: data-platform-viewers

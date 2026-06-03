@@ -1,0 +1,16 @@
+# Lakeview dashboard. The .lvdash.json file is exported from a hand-built
+# dashboard in the workspace (see plan.md, build phase 3 / task 8). Dataset
+# queries inside the file should reference ${catalog} and ${schema} so the
+# bundle substitutes them per target.
+resources:
+  dashboards:
+    demo_dashboard:
+      display_name: "[${bundle.target}] DABs Demo Dashboard"
+      warehouse_id: ${var.warehouse_id}
+      parent_path: /Workspace/Users/${workspace.current_user.userName}
+      file_path: ../src/dashboard/demo.lvdash.json
+      # dataset_catalog + dataset_schema are injected at deploy time so the
+      # .lvdash.json SQL can use unqualified table names (no catalog prefix).
+      # See: https://docs.databricks.com/aws/en/dev-tools/bundles/resources#dashboard
+      dataset_catalog: ${var.catalog}
+      dataset_schema:  ${resources.schemas.demo.name}

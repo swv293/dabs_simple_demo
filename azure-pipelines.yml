@@ -1,0 +1,120 @@
+# azure-pipelines.yml — TALK-TRACK ARTIFACT (not executed by the live demo).
+#
+# Shown on screen during the CI/CD portion of the talk to make the promotion
+# story concrete. To actually run this you would:
+#   - create an Azure DevOps project
+#   - configure 3 ADO Environments: databricks-dev, databricks-staging,
+#     databricks-prod  (the prod one gets a required-approver gate)
+#   - add OAuth M2M secrets:
+#       DATABRICKS_HOST, DATABRICKS_CLIENT_ID, DATABRICKS_CLIENT_SECRET
+#     (one set per environment; the prod env overrides for the prod workspace)
+#
+# The whole point: same `databricks bundle deploy` command, three targets,
+# one human approval before prod.
+
+trigger:
+  branches:
+    include:
+      - main
+      - release/*
+  tags:
+    include:
+      - v*
+
+pr:
+  branches:
+    include:
+      - main
+
+variables:
+  DATABRICKS_CLI_VERSION: "0.240.0"
+
+stages:
+
+  # -------------------------------------------------------------------------
+  # Stage 1 — Validate. Runs on every PR and every push.
+  # -------------------------------------------------------------------------
+  - stage: Validate
+    jobs:
+      - job: validate_and_test
+        pool:
+          vmImage: ubuntu-latest
+        steps:
+          - script: curl -fsSL https://raw.githubusercontent.com/databricks/setup-cli/main/install.sh | sh
+            displayName: Install Databricks CLI
+
+          - script: |
+              databricks bundle validate -t dev
+              databricks bundle validate -t staging
+              databricks bundle validate -t prod
+            displayName: bundle validate (all targets)
+
+          - script: |
+              pip install pytest
+              pytest tests/unit -q
+            displayName: pytest unit tests
+
+  # -------------------------------------------------------------------------
+  # Stage 2 — Deploy to dev. Auto-runs on merge to main.
+  # -------------------------------------------------------------------------
+  - stage: Deploy_Dev
+    dependsOn: Validate
+    condition: and(succeeded(), eq(variables['Build.SourceBranch'], 'refs/heads/main'))
+    jobs:
+      - deployment: deploy_dev
+        environment: databricks-dev      # no approval gate
+        pool:
+          vmImage: ubuntu-latest
+        strategy:
+          runOnce:
+            deploy:
+              steps:
+                - script: curl -fsSL https://raw.githubusercontent.com/databricks/setup-cli/main/install.sh | sh
+                  displayName: Install Databricks CLI
+                - script: databricks bundle deploy -t dev
+                  displayName: bundle deploy -t dev
+                - script: databricks bundle run daily_etl -t dev
+                  displayName: smoke run (dev)
+
+  # -------------------------------------------------------------------------
+  # Stage 3 — Deploy to staging. Auto-runs on release/* branches.
+  # -------------------------------------------------------------------------
+  - stage: Deploy_Staging
+    dependsOn: Validate
+    condition: and(succeeded(), startsWith(variables['Build.SourceBranch'], 'refs/heads/release/'))
+    jobs:
+      - deployment: deploy_staging
+        environment: databricks-staging  # optional light approval
+        pool:
+          vmImage: ubuntu-latest
+        strategy:
+          runOnce:
+            deploy:
+              steps:
+                - script: curl -fsSL https://raw.githubusercontent.com/databricks/setup-cli/main/install.sh | sh
+                  displayName: Install Databricks CLI
+                - script: databricks bundle deploy -t staging
+                  displayName: bundle deploy -t staging
+                - script: databricks bundle run daily_etl -t staging
+                  displayName: smoke run (staging)
+
+  # -------------------------------------------------------------------------
+  # Stage 4 — Deploy to prod. Runs on v* tags AFTER staging succeeds AND
+  # AFTER a human approver clicks "Approve" on the databricks-prod env.
+  # -------------------------------------------------------------------------
+  - stage: Deploy_Prod
+    dependsOn: Deploy_Staging
+    condition: and(succeeded(), startsWith(variables['Build.SourceBranch'], 'refs/tags/v'))
+    jobs:
+      - deployment: deploy_prod
+        environment: databricks-prod     # <-- REQUIRED human approval gate (set in ADO UI)
+        pool:
+          vmImage: ubuntu-latest
+        strategy:
+          runOnce:
+            deploy:
+              steps:
+                - script: curl -fsSL https://raw.githubusercontent.com/databricks/setup-cli/main/install.sh | sh
+                  displayName: Install Databricks CLI
+                - script: databricks bundle deploy -t prod
+                  displayName: bundle deploy -t prod
