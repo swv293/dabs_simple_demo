@@ -52,27 +52,36 @@ dabs_simple_demo/
 
 > **Free Edition / single-catalog workspaces:** catalog creation via the CLI may require an explicit storage location. Use the `workspace` catalog (pre-created on Free Edition) and differentiate environments by schema name — set `catalog: workspace` in each target's variables. The isolation story is identical, just at the schema level (see §6).
 
-After installing the CLI, authenticate:
+**Step 1 — Authenticate and create a named profile:**
 
 ```bash
-databricks auth login --host https://<your-workspace>.cloud.databricks.com
+databricks auth login \
+  --host https://<your-workspace>.cloud.databricks.com \
+  --profile my-workspace
 ```
 
-Set these env vars once — add them to your shell profile or a gitignored `.env` file. Nothing workspace-specific lives in the YAML:
+This saves credentials to `~/.databrickscfg` under the profile name `my-workspace`. Use any name you like — you'll pass it to every bundle command.
+
+**Step 2 — Set env vars once** (add to your shell profile or a gitignored `.env` file):
 
 ```bash
-# Required — your workspace URL
-export DATABRICKS_HOST="https://<your-workspace>.cloud.databricks.com"
+# Your CLI profile name from Step 1
+export DATABRICKS_CONFIG_PROFILE="my-workspace"
 
-# Required — the UC catalog to deploy into (Free Edition default is "workspace")
+# UC catalog to deploy into (Free Edition default is "workspace")
 export BUNDLE_VAR_catalog="workspace"
 
-# Required — system Terraform (avoids CLI PGP key expiry issues)
+# System Terraform — required to avoid a CLI PGP key expiry bug
 export DATABRICKS_TF_EXEC_PATH="$(which terraform)"
 export DATABRICKS_TF_VERSION="1.15.5"
 ```
 
-`BUNDLE_VAR_catalog` is the `BUNDLE_VAR_` prefix convention — any bundle variable `x` can be set via `BUNDLE_VAR_x` without touching the YAML. You can also pass it inline: `--var catalog=workspace`.
+With `DATABRICKS_CONFIG_PROFILE` set, all `databricks bundle` commands pick up the right workspace automatically — no `--profile` flag needed on every command.
+
+> **Why a profile and not just `DATABRICKS_HOST`?**
+> `DATABRICKS_HOST` only sets the URL — it doesn't carry credentials. The CLI needs both a host *and* a token/OAuth flow. `databricks auth login` stores both in the profile; `DATABRICKS_CONFIG_PROFILE` tells the CLI which profile to use.
+
+> **`BUNDLE_VAR_catalog`** uses the `BUNDLE_VAR_` prefix convention — any bundle variable `x` can be set this way without touching the YAML. You can also pass it inline: `--var catalog=workspace`.
 
 ---
 
@@ -143,14 +152,16 @@ targets:
 2. Override behaviour via `mode:` + `run_as:` + `permissions:`
 3. Override `workspace.root_path` for prod — moves bundle state to a shared folder
 
-**How workspace host resolution works:**
+**How workspace auth resolution works:**
 
-| Priority | Mechanism |
-|---|---|
-| 1 (highest) | `DATABRICKS_HOST` environment variable |
-| 2 | `DATABRICKS_CONFIG_PROFILE` env var → `~/.databrickscfg` profile |
-| 3 | `--profile` / `-p` CLI flag → `~/.databrickscfg` profile |
-| 4 | Default profile in `~/.databrickscfg` |
+| Priority | Mechanism | Notes |
+|---|---|---|
+| 1 (highest) | `--profile my-workspace` CLI flag | Explicit per-command override |
+| 2 | `DATABRICKS_CONFIG_PROFILE=my-workspace` env var | **Recommended** — set once in your shell |
+| 3 | `DATABRICKS_HOST` + `DATABRICKS_TOKEN` env vars | Host alone is not enough — token required too |
+| 4 | Default profile in `~/.databrickscfg` | Used if nothing else is set |
+
+For multi-environment promotion in CI/CD, set `DATABRICKS_CONFIG_PROFILE` (or `DATABRICKS_HOST` + `DATABRICKS_CLIENT_ID` + `DATABRICKS_CLIENT_SECRET` for OAuth M2M) as pipeline secret variables scoped per environment.
 
 ---
 
@@ -309,6 +320,8 @@ This is fragile — any schema rename breaks it — but works for simple demos w
 
 ## 7. The four CLI verbs
 
+With `DATABRICKS_CONFIG_PROFILE` set in your environment (see §3), run:
+
 ```bash
 # 1. Check the YAML is valid — fast, no workspace changes
 databricks bundle validate -t dev
@@ -323,12 +336,14 @@ databricks bundle run daily_etl -t dev
 databricks bundle destroy -t dev
 ```
 
-Or use the helper scripts:
+Or use the helper scripts (they pick up all env vars automatically):
 
 ```bash
 ./scripts/demo_deploy.sh dev    # validate + deploy + run in one shot
 ./scripts/teardown.sh dev       # destroy + belt-and-suspenders schema drop
 ```
+
+> If you haven't set `DATABRICKS_CONFIG_PROFILE`, add `--profile <your-profile>` to every command.
 
 ---
 
@@ -360,31 +375,49 @@ Same commands, different credentials, different workspace, different target. Tha
 
 ## 9. Live demo runbook
 
-Exact sequence for the live demo (single terminal, ~6 minutes):
+Exact sequence for the live demo (single terminal, ~6 minutes).
+
+**Before you start — set env vars in your shell** (one-time setup, survives restarts if added to your profile):
+
+```bash
+export DATABRICKS_CONFIG_PROFILE="my-workspace"   # your profile from `databricks auth login`
+export BUNDLE_VAR_catalog="workspace"              # your UC catalog
+export DATABRICKS_TF_EXEC_PATH="$(which terraform)"
+export DATABRICKS_TF_VERSION="1.15.5"
+```
+
+**Pre-flight check — confirm workspace is clean:**
+
+```bash
+./scripts/teardown.sh dev    # no-op if already clean; safe to run every time
+```
+
+**Demo sequence:**
 
 ```bash
 cd ~/dabs_simple_demo
 
-# Step 1 — validate (show the clean output)
+# Step 1 — validate (show the clean output, ~5 seconds)
 databricks bundle validate -t dev
 
-# Step 2 — deploy (narrate: job / schema / volume / dashboard being created)
+# Step 2 — deploy (~20 seconds; narrate: job / schema / volume / dashboard)
 databricks bundle deploy -t dev
 
-# Step 3 — open workspace UI
-#   → Jobs: "[dev <user>] daily_etl" with 4 tasks, schedule paused
-#   → Catalog Explorer: schema dev_<user>_dabs_demo_dev, volume raw
-#   → Dashboards: "[dev] DABs Demo Dashboard" (no data yet)
+# Step 3 — open workspace UI and show:
+#   → Workflows: "[dev <user>] daily_etl" — 4 tasks, schedule paused
+#   → Catalog Explorer: schema [dev <user>_]dabs_demo_dev, volume raw, 3 empty tables
+#   → Dashboards: "[dev] DABs Demo Dashboard" (placeholder widget)
 
 # Step 4 — run the pipeline (~90 seconds)
 databricks bundle run daily_etl -t dev
 
-# Step 5 — refresh dashboard → revenue trend, top products, orders by region
+# Step 5 — verify data (optional — open Catalog Explorer, check table row counts)
+#   bronze_orders: 5,000 rows  silver_orders: 5,000 rows  gold_daily_revenue: ~120 rows
 
-# Step 6 — teardown (audience sees workspace go clean)
+# Step 6 — teardown (show the workspace going clean, ~20 seconds)
 ./scripts/teardown.sh dev
 
-# Step 7 — redeploy in one line (reinforces "this is one command")
+# Step 7 — one-command redeploy (reinforces the point)
 ./scripts/demo_deploy.sh dev
 ```
 

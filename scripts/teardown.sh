@@ -2,11 +2,13 @@
 # teardown.sh — wipe a deployment so the demo can re-run from scratch.
 #
 # Required env vars (same as demo_deploy.sh):
-#   DATABRICKS_HOST        e.g. https://<your-workspace>.cloud.databricks.com
-#   BUNDLE_VAR_catalog     e.g. workspace
+#   DATABRICKS_CONFIG_PROFILE  your ~/.databrickscfg profile name
+#   BUNDLE_VAR_catalog         UC catalog (used for belt-and-suspenders DROP SCHEMA)
+#   DATABRICKS_TF_EXEC_PATH    path to system terraform binary
+#   DATABRICKS_TF_VERSION      matching terraform version string
 #
-# `databricks bundle destroy` deletes all bundle-managed resources (job,
-# dashboard, schema + its tables/volume). The schema DROP below is only a
+# `databricks bundle destroy` removes all bundle-managed resources (job,
+# dashboard, schema + tables + volume). The schema DROP below is only a
 # belt-and-suspenders step for data written outside the bundle; it is
 # skipped if catalog/schema info can't be resolved.
 #
@@ -16,7 +18,10 @@
 set -euo pipefail
 
 TARGET="${1:-dev}"
-TF_ARGS=(DATABRICKS_TF_EXEC_PATH="$(which terraform)" DATABRICKS_TF_VERSION="1.15.5")
+TF_ARGS=(
+  DATABRICKS_TF_EXEC_PATH="$(which terraform)"
+  DATABRICKS_TF_VERSION="1.15.5"
+)
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$HERE"
 
@@ -32,8 +37,8 @@ echo "==> bundle destroy (target=$TARGET)"
 env "${TF_ARGS[@]}" databricks bundle destroy -t "$TARGET" --auto-approve
 
 # Belt-and-suspenders: drop any data that bundle destroy may have left behind.
-# bundle destroy already removes the managed schema, so this is a no-op
-# in normal usage — it only matters if you wrote extra tables outside the bundle.
+# bundle destroy already removes the managed schema, so this is a no-op in
+# normal usage — it only matters if extra tables were written outside the bundle.
 if [[ -n "$CATALOG" && -n "$SCHEMA" && -n "$WAREHOUSE" && -n "$HOST" ]]; then
   echo "==> belt-and-suspenders DROP SCHEMA IF EXISTS ${CATALOG}.${SCHEMA}"
   TMP_JSON="$(mktemp /tmp/teardown_sql_XXXXXX.json)"
